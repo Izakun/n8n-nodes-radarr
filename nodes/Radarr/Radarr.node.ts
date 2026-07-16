@@ -293,71 +293,68 @@ export class Radarr implements INodeType {
 					return this.helpers.httpRequestWithAuthentication.call(this, 'radarrApi', options);
 				};
 
-				let response: unknown;
+				const param = <T>(name: string, fallback?: T) =>
+					this.getNodeParameter(name, i, fallback as T) as T;
 
-				if (resource === 'system') {
-					response = await request('GET', operation === 'getHealth' ? '/api/v3/health' : '/api/v3/system/status');
-				} else if (resource === 'queue') {
-					response = await request('GET', '/api/v3/queue');
-				} else if (resource === 'calendar') {
-					const filters = this.getNodeParameter('calendarFilters', i, {}) as IDataObject;
-					response = await request('GET', '/api/v3/calendar', { qs: filters });
-				} else if (resource === 'command') {
-					const name = this.getNodeParameter('commandName', i) as string;
-					const movieIdsRaw = this.getNodeParameter('movieIds', i, '') as string;
-					const body: IDataObject = { name };
-					if (movieIdsRaw.trim()) {
-						body.movieIds = movieIdsRaw
-							.split(',')
-							.map((s) => Number(s.trim()))
-							.filter((n) => !Number.isNaN(n));
-					}
-					response = await request('POST', '/api/v3/command', { body });
-				} else if (resource === 'movie') {
-					if (operation === 'getMany') {
-						response = await request('GET', '/api/v3/movie');
-					} else if (operation === 'get') {
-						const movieId = this.getNodeParameter('movieId', i) as number;
-						response = await request('GET', `/api/v3/movie/${movieId}`);
-					} else if (operation === 'search') {
-						const term = this.getNodeParameter('term', i) as string;
-						response = await request('GET', '/api/v3/movie/lookup', { qs: { term } });
-					} else if (operation === 'delete') {
-						const movieId = this.getNodeParameter('movieId', i) as number;
-						const del = this.getNodeParameter('deleteOptions', i, {}) as IDataObject;
+				const handlers: Record<string, () => Promise<unknown>> = {
+					'system:getStatus': () => request('GET', '/api/v3/system/status'),
+					'system:getHealth': () => request('GET', '/api/v3/health'),
+					'queue:getMany': () => request('GET', '/api/v3/queue'),
+					'calendar:get': () =>
+						request('GET', '/api/v3/calendar', { qs: param<IDataObject>('calendarFilters', {}) }),
+					'command:trigger': () => {
+						const body: IDataObject = { name: param<string>('commandName') };
+						const ids = param<string>('movieIds', '');
+						if (ids.trim()) {
+							body.movieIds = ids
+								.split(',')
+								.map((s) => Number(s.trim()))
+								.filter((n) => !Number.isNaN(n));
+						}
+						return request('POST', '/api/v3/command', { body });
+					},
+					'movie:getMany': () => request('GET', '/api/v3/movie'),
+					'movie:get': () => request('GET', `/api/v3/movie/${param<number>('movieId')}`),
+					'movie:search': () =>
+						request('GET', '/api/v3/movie/lookup', { qs: { term: param<string>('term') } }),
+					'movie:delete': async () => {
+						const movieId = param<number>('movieId');
+						const del = param<IDataObject>('deleteOptions', {});
 						await request('DELETE', `/api/v3/movie/${movieId}`, {
 							qs: {
 								deleteFiles: del.deleteFiles ? 'true' : 'false',
 								addImportExclusion: del.addImportExclusion ? 'true' : 'false',
 							},
 						});
-						response = { success: true, movieId };
-					} else {
-						// add: look up the movie by TMDB id, then POST the enriched resource
-						const tmdbId = this.getNodeParameter('tmdbId', i) as number;
-						const qualityProfileId = this.getNodeParameter('qualityProfileId', i) as number;
-						const rootFolderPath = this.getNodeParameter('rootFolderPath', i) as string;
-						const addOptions = this.getNodeParameter('addOptions', i, {}) as IDataObject;
-
+						return { success: true, movieId };
+					},
+					'movie:add': async () => {
+						const addOptions = param<IDataObject>('addOptions', {});
 						const looked = (await request('GET', '/api/v3/movie/lookup/tmdb', {
-							qs: { tmdbId },
+							qs: { tmdbId: param<number>('tmdbId') },
 						})) as IDataObject;
+						return request('POST', '/api/v3/movie', {
+							body: {
+								...looked,
+								qualityProfileId: param<number>('qualityProfileId'),
+								rootFolderPath: param<string>('rootFolderPath'),
+								monitored: addOptions.monitored ?? true,
+								minimumAvailability: addOptions.minimumAvailability ?? 'released',
+								addOptions: { searchForMovie: addOptions.searchForMovie ?? true },
+							},
+						});
+					},
+				};
 
-						const body: IDataObject = {
-							...looked,
-							qualityProfileId,
-							rootFolderPath,
-							monitored: addOptions.monitored ?? true,
-							minimumAvailability: addOptions.minimumAvailability ?? 'released',
-							addOptions: { searchForMovie: addOptions.searchForMovie ?? true },
-						};
-						response = await request('POST', '/api/v3/movie', { body });
-					}
-				} else {
-					throw new NodeOperationError(this.getNode(), `Unknown resource: ${resource}`, {
-						itemIndex: i,
-					});
+				const handler = handlers[`${resource}:${operation}`];
+				if (!handler) {
+					throw new NodeOperationError(
+						this.getNode(),
+						`Unsupported operation: ${resource} / ${operation}`,
+						{ itemIndex: i },
+					);
 				}
+				const response = await handler();
 
 				if (Array.isArray(response)) {
 					for (const element of response) {
