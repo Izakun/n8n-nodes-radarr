@@ -16,7 +16,7 @@ export class Radarr implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Radarr',
 		name: 'radarr',
-		icon: { light: 'file:radarr.svg', dark: 'file:radarr.svg' },
+		icon: { light: 'file:radarr.svg', dark: 'file:radarr.dark.svg' },
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"] + " : " + $parameter["resource"]}}',
