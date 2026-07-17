@@ -38,6 +38,19 @@ npm install --ignore-scripts
 npm run build
 ```
 
+## Usage example
+
+List movies in the library:
+
+1. Add the node after a trigger (e.g. *When clicking 'Test workflow'*).
+2. Select your credential.
+3. Resource **Movie** → **Get Many**.
+4. Execute the node — example output:
+
+```json
+{ "id": 1, "title": "Inception", "year": 2010, "hasFile": true, "monitored": true }
+```
+
 ## Disclaimer
 
 This project isn't affiliated with or endorsed by the Radarr project. Radarr is the
